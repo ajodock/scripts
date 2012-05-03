@@ -1,0 +1,1060 @@
+#!/bin/bash
+#Copyright (c) 2012 Adam Jodock
+
+#Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation 
+#files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, 
+#modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the 
+#Software is furnished to do so, subject to the following conditions:
+
+#The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE 
+#WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
+#COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, 
+#ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+# Program Name:         stmf_view
+# Program Description:  This program is designed to give an entire overview 
+#                       of the storage framework
+# Author:               Adam Jodock
+# Contact:              echo "ajodock,hotmail.com" | sed -e 's/,/@/' -e 's/hot/g/'
+
+#  SCSI target mode framework (stmf)
+#
+#   Portal
+#        \
+#         TPG        Logged in Initiators
+#            \      /
+#             Target                              Allowed Initiators
+#                   \                            /
+#                    Target Group      Host Group
+#                                \    /
+#                                 View
+#                                /
+#                              LU
+#                             /
+#                         zvol,device,file
+#
+
+#  The goal of this program is to display all of the information in this tree changing
+#  the root that the data is sorted on.
+
+#  This allows the user to better view what data is available to what clients.  For
+#  instance you might want to know every LU that is available to a particular target,
+#  or which LUs are visible by a particular host group.
+
+#  Increasing the verbosity can create quite a lot of output, especially if you have a 
+#  lot of LUs or targets.  It is a good idea to save the output to a file and then use 
+#  less/more/a text editor to view the output.
+
+
+
+#This function requires two inputs.  The first is a description of the section that the output is coming from
+#and the second is minimum number for the output to be displayed
+function debug()
+{
+	if [ "$debug" -ge "$2" ]
+	then
+		echo "$results" | sed "s/^/$1: /" 1>&2
+	fi
+}
+
+#This function requires two inputs.  The first is the minimum debug level that the output should be displayed
+#and the second is the function that should be called
+function verbose()
+{
+	if [ "$debug" -ge "$1" ]
+	then
+		$2
+	fi
+}
+
+#This function takes the $results variable, sorts -u it, and then prints the results
+function print_results()
+{
+	if [ -n "$results" ]
+	then
+		echo -e -n  "$results" | sort -u
+	fi
+
+	debug "print_results" 9
+}
+
+#This function returns all available targets
+function get_targets()
+{
+	results="$(stmfadm list-target | awk '{print $2}')"
+	debug "get_targets" 3
+
+	print_results
+}
+
+#This function returns several lines of info related to $TARGET
+function get_target_info()
+{
+	if [ -z "$TARGET" ]
+	then
+		echo "Error in get_target_info: TARGET=$TARGET"
+		exit
+	fi
+
+	if [ -n "$(get_targets | grep "$TARGET")" ]
+	then
+		results="$(stmfadm list-target -v $TARGET | egrep -v 'Target|Alias|Initiator|Logged in' | sed 's/^ *//')"
+		
+		iscsi_regex="^iqn."
+		fc_regex="^wwn."
+
+		if [[ "$TARGET" =~ $iscsi_regex ]]
+		then
+			results="$results\n$(itadm list-target -v $TARGET | egrep -v "^iqn.|tpg-tags:|TARGET NAME" | sed 's/^[\t ]*//')"	
+		elif [[ "$TARGET" =~ $fc_regex ]]
+		then
+			wwn="$(echo "$TARGET" | sed 's/wwn\.//')"
+			results="$results\n$(fcinfo hba-port $wwn | grep -v 'HBA Port WWN' | sed 's/^\t//')"
+		fi
+		debug "get_target_info" 3
+		print_results
+	fi
+}
+
+#This function returns a list of the portals related to $TPG
+function get_tpg_portals()
+{
+	if [ -z "$TPG" ]
+	then
+		echo "Error in get_tpg_portals: TPG=$TPG"
+		exit
+	fi
+
+	results="$(itadm list-tpg -v $TPG | grep 'portals:' | awk '{print $2}' | sed 's/,/\n/')"
+	
+	debug "get_tpg_portals" 3
+	print_results
+
+}
+
+#This function returns a list of TPGs related to $TARGET
+function get_target_tpgs()
+{
+	if [ -z "$TARGET" ]
+	then
+		echo "Error in get_target_tpgs: TARGET=$TARGET"
+		exit
+	fi
+
+	iscsi_regex="^iqn."
+
+	if [[ "$TARGET" =~ $iscsi_regex ]]
+	then
+		results="$(itadm list-target -v $TARGET | grep tpg-tags | awk '{$1="";print $0}' | sed 's/^[\t ]*//' | sed 's/ = [0-9]*//g' | sed 's/,/\n/g')"
+	fi
+	
+	debug "get_target_tpgs" 3
+	print_results
+}
+
+#Returns a list of views (in the same format as list_views) that are associated to $HG
+function get_hg_views()
+{
+	if [ -z "$HG" ]
+	then
+		echo "Error in get_hg_views: $HG"
+		exit
+	fi
+
+	results="$(echo "$(get_views)" | awk -v HG="$HG" -F, '{if ($5 == "HG");print $0}')"
+
+	debug "get_hg_views" 5
+	print_results
+}
+
+#Returns a list of views (in the same format as list_views) that are associated to $TG
+function get_tg_views() 
+{                       
+        if [ -z "$TG" ]
+        then    
+                echo "Error in get_tg_views: $TG"
+                exit
+        fi
+
+        results="$(echo "$(get_views)" | awk -v TG="$TG" -F, '{if ($4 == "TG");print $0}')"
+
+        debug "get_tg_views" 5
+        print_results
+}
+
+
+#This function returns all of the initators related to $TARGET
+function get_target_initiators()
+{
+	if [ -z "$TARGET" ]
+	then
+		echo "Error in get_target_initiators: TARGET=$TARGET"
+		exit
+	fi
+
+	if [ "$TARGET" != "All" ]
+	then
+		results="$(stmfadm list-target -v $TARGET | grep 'Initiator' | awk '{print $2}')"
+		debug "get_target_initiators" 3
+		print_results
+	fi
+}
+
+#This function returns information about $INITIATOR
+function get_target_initiator_info()
+{
+	if [ -z "$INITIATOR" -o -z "$TARGET" ]
+	then
+		echo "Error in get_target_initiator_info: TARGET=$TARGET INITIATOR=$INITIATOR"
+		exit
+	fi
+
+	info="$(stmfadm list-target -v $TARGET | egrep 'Initiator:|Alias:|Logged in')"
+	debug "get_target_initiator_info" 3
+	
+	#INITIATOR_FIX="$(echo "$INITIATOR" | sed 's/\./\\./g')"
+	regex="Initiator: $INITIATOR"
+
+	unset found
+	echo "$info" | while read line
+	do
+		if [[ "$line" =~ "$regex" ]]
+		then
+			found='1'
+		elif [ "$found" == '1' ]
+		then
+			echo "$line" | sed 's/\ *//'
+			found='2'
+		elif [ "$found" == '2' ]
+		then
+			echo "$line" | sed 's/\ *//'
+			unset found
+		fi
+	done
+}
+
+#This function returns a list of all of the host groups
+function get_hgs()
+{
+	results="All\n$(stmfadm list-hg | awk '{print $3}')"
+	debug "get_hgs" 4
+	print_results
+}
+
+#This function returns a list of all of the target groups
+function view_tg()
+{
+	if [ -z "$LU" -o -z "$VE" ]
+	then
+		echo "Error in view_tg: LU=$LU VE=$VE"
+		exit
+	fi
+
+	results="$(stmfadm list-view -l $LU $VE | grep 'Target group' | awk '{print $4}')"
+	debug "view_tg" 4
+	print_results
+}
+
+#This function returns a list of initiators that are a member of $HG
+function get_hg_members()
+{
+	if [ -z "$HG" ]
+	then
+		echo "Error in get_hg_members: HG=$HG"
+		exit
+	fi
+
+	if [ "$HG" != 'All' ]
+	then
+		results="$(stmfadm list-hg -v $HG | grep -v 'Host Group:' | sed 's/^\tMember: //')"
+		debug "get_hg_members" 3
+		print_results
+	fi
+}
+
+#This function returns a list of all LUs
+function get_lus()
+{
+	results="$(sbdadm list-lu | egrep '[0-9abcdef]{32}' | awk '{print $1}')"
+	debug "get_lus" 3
+	print_results
+}
+
+#This function returns information related to $LU
+function get_lu_info()
+{
+	if [ -z "$LU" ]
+	then
+		echo "Error in get_lu_info: LU=$LU"
+		exit
+	fi
+
+	results="$(stmfadm list-lu -v $LU 2> /dev/null | grep -v 'LU Name:' | sed 's/^\ *//')"
+	debug "get_lu_info" 4
+	print_results
+}
+
+#This function returns the zfs volume name of $LU
+function get_zfs_device()
+{
+	if [ -z "$LU" ]
+	then
+		echo "Error in get_lu_info: LU=$LU"
+		exit
+	fi
+
+	device_path="$(stmfadm list-lu -v $LU | grep 'Data File' | awk '{$1=$2=$3="";print $0}' | sed 's/^ *//')"
+
+	regex="^/dev/zvol/(rdsk|dsk)"
+
+	if [[ "$device_path" =~ $regex ]]
+	then
+		results="$(echo "$device_path" | sed 's#^/dev/zvol/.dsk/##')"
+	fi
+
+	debug "get_lu_device" 3
+	print_results
+}
+
+#This function returns a list of all target groups
+function get_tgs()
+{
+	results="All\n$(stmfadm list-tg | awk '{print $3}')"
+	debug "get_tgs" 4
+	print_results
+}
+
+#This function returns a list of all the targets that are a member of a target group
+function get_tg_members()
+{
+	if [ -z "$TG" ]
+	then
+		echo "Error in get_tg_members: TG=$TG"
+		exit
+	fi
+
+	if [ "$TG" == 'All' ]
+	then
+		results="$(get_targets | awk '{print $2}')"
+	else
+		results="$(stmfadm list-tg -v $TG | grep 'Member:' | awk '{print $2}')"
+	fi
+	debug "get_tg_members" 3
+	print_results
+}
+
+#This function returns a list of TGs that the $TARGET is a member of
+function get_tg_membership()
+{
+	if [ -z "$TARGET" ]
+	then
+		echo "Error in get_tg_membership: TARGET=$TARGET"
+		exit
+	fi
+
+	results='All'
+	for TG in $(get_tgs)
+	do
+		if [ "$TG" == 'All' ]
+		then
+			continue
+		fi
+
+		for TARGET_MEMBER in $(stmfadm list-tg -v $TG | grep 'Member:' | awk '{print $2}')
+		do
+			if [ "$TARGET_MEMBER" == "$TARGET" ]
+			then
+				results="$results\n$TG"
+			fi
+		done
+	done
+	debug "get_tg_membersip" 3
+	print_results
+}
+
+#This function returns info about the ZFS device $device
+function get_zfs_info()
+{
+	if [ -z "$device" ]
+	then
+		echo "Error in get_tg_members: device=$device"
+		exit
+	fi
+
+	options="used,referenced,compressratio,compression,refreservation,logbias,volblocksize,volsize,dedup,sync"
+	origin="$(zfs get origin $device | grep -v "VALUE" | awk '{print $3}')"
+	results="$(zfs get $options $device | grep "$device" | sed "s#^$device *##")"
+
+	debug "get_zfs_info" 3
+	print_results
+
+	if [ "$origin" != '-' ]
+	then
+		results="$(echo "Origin: $origin")"
+		device="$origin"
+
+		#These print_results have to be split up because they are sorted.
+		#Maybe should have another function without a sort
+		debug "get_zfs_info_origin" 3
+		verbose 2 print_results
+
+		#Yay recursion!
+		results="$(get_zfs_info | sed 's/^/   /')"
+		debug "get_zfs_info_origin" 3
+		verbose 2 print_results		
+	fi
+
+}
+
+#This function returns a list of view entries that $LU is a member of
+function get_view_ves()
+{
+	if [ -z "$LU" ]
+	then
+		echo "Error in get_view_ves: LU=$LU"
+		exit
+	fi
+
+	results="$(stmfadm list-view -l $LU 2> /dev/null | grep 'View Entry:' | awk '{print $3}')"
+	debug "get_view_ves" 3
+	print_results
+}
+
+#This function returns the LU,VE,TG,HG of every view that has $HG as its host group
+function get_views()
+{
+	unset results
+	for LU in $(get_lus)
+	do
+		for VE in $(get_view_ves)
+		do
+			#I would really like to do a while read line here, but that requires a pipe
+			#Which wont let me pass the variables back easily.  This may not be as efficent
+			#But I cant be bothered to look up how I got around that last time :)
+			view_entry="$(stmfadm list-view -l $LU $VE)"
+			host_group="$(echo "$view_entry" | grep 'Host group' | awk '{print $4}')"
+			target_group="$(echo "$view_entry" | grep 'Target group' | awk '{print $4}')"
+			lun="$(echo "$view_entry" | grep 'LUN' | awk '{print $3}')"
+			
+			if [ -z "$results" ]
+			then
+				results="$LU,$VE,$lun,$target_group,$host_group"
+			else
+				results="$results\n$LU,$VE,$lun,$target_group,$host_group"
+			fi
+		done
+	done
+
+	debug "get_views" 3
+	print_results
+}
+
+#Check to make sure that the user only specified one function
+function check_action()
+{
+	if [ -n "$action" ]
+	then
+		echo "Error: Only specify one action"
+		exit
+	fi
+}
+
+#Returns the next color from color_list
+function get_color()
+{
+	if [ -z "$color" ]
+	then
+		color="antiquewhite4"
+	fi
+
+	found='0'
+	results=''
+
+	#Grab the next color in the list from the current one
+	for COLOR in $color_list
+	do
+		if [ "$found" == '1' ]
+		then
+			results="$COLOR"
+			break
+		fi
+
+		if [ "$color" == "$COLOR" ]
+		then
+			found='1'
+		fi
+	done
+
+        if [ -z "$results" ]
+        then
+                results="antiquewhite4"
+        fi
+
+	print_results
+}
+
+#List entire tree with view as the root
+function list-view()
+{
+	if [ -z "$objects" ]
+	then
+		lu_list="$(get_lus)"
+	else
+		lu_list="$objects"
+	fi
+
+	views="$(get_views)"
+
+	for VIEW in $views
+	do
+		LU="$(echo "$VIEW" | awk -F, '{print $1}')"
+		VE="$(echo "$VIEW" | awk -F, '{print $2}')"
+		LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
+		TG="$(echo "$VIEW" | awk -F, '{print $4}')"
+		HG="$(echo "$VIEW" | awk -F, '{print $5}')"
+		echo "View: $LU,$VE"
+		echo "   LU: $LU"
+		echo "      View Entry: $VE"
+		verbose 1 get_lu_info | sed 's/^/   /'
+		device="$(get_zfs_device)"
+		echo "      ZFS Volume: $device"
+		verbose 1 get_zfs_info | sed 's/^/         /'
+
+		echo "   Host Group: $HG"
+		get_hg_members | sed 's/^/      Initiator: /'
+		
+
+		echo "   Target Group: $TG"
+		for TARGET in $(get_tg_members)
+		do
+			echo "      Target: $TARGET"
+			verbose 1 get_target_info | sed 's/^/         /'
+
+			for INITIATOR in $(get_target_initiators)
+			do
+				echo "         Initiator: $INITIATOR"
+				verbose 1 get_target_initiator_info | sed 's/^/            /'
+			done
+
+			for TPG in $(get_target_tpgs)
+			do
+				echo "         Target Portal Group: $TPG"
+				for PORTAL in $(get_tpg_portals)
+				do
+					echo "         Portal: $PORTAL"
+				done
+			done
+		done
+	done
+}
+
+#List the entire tree with TG as root
+function list-tg()
+{
+	if [ -z "$objects" ]
+	then
+		tg_list="$(get_tgs)"
+	else
+		tg_list="$objects"
+	fi
+
+	views="$(get_views)"
+
+	for TG in $tg_list
+	do
+		echo "Target Group: $TG"
+		for TARGET in $(get_tg_members)
+		do
+			echo "   Target: $TARGET"
+			for INITIATOR in $(get_target_initiators)
+			do
+				echo "      Initiator: $INITIATOR"
+				verbose 1 get_target_initiator_info | sed 's/^/         /'
+			done
+			for TPG in $(get_target_tpgs)
+			do
+				echo "      Target Portal Group: $TPG"
+				for PORTAL in $(get_tpg_portals)
+				do
+					echo "         Portal: $PORTAL"
+				done
+			done
+			verbose 1 get_target_info | sed 's/^/      /'
+		done
+
+		for VIEW in $(echo "$views" | egrep ",$TG,|,All,")
+		do
+			LU="$(echo "$VIEW" | awk -F, '{print $1}')"
+			VE="$(echo "$VIEW" | awk -F, '{print $2}')"
+			LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
+			HG="$(echo "$VIEW" | awk -F, '{print $5}')"
+
+			echo "   LU: $LU"
+			echo "      View Entry: $VE"
+			echo "      Host Group: $HG"
+			echo "      LUN       : $LUN"
+
+			for INITIATOR in $(get_hg_members)
+			do
+				echo "         Initiator: $INITIATOR"
+			done
+
+			verbose 1 get_lu_info | sed 's/^/      /'
+
+			device="$(get_zfs_device)"
+			echo "      ZFS Device: $device"
+			verbose 1 get_zfs_info | sed 's/^/         /'
+
+		done
+	done
+}
+
+
+#List the entire tree with target as the root
+function list-target()
+{
+	if [ -z "$objects" ]
+	then
+		target_list="$(get_targets)"
+	else
+		target_list="$objects"
+	fi
+
+	views="$(get_views)"
+
+	for TARGET in $target_list
+	do
+		echo "Target: $TARGET"
+		verbose 1 get_target_info | sed 's/^/   /'
+
+		for INITIATOR in $(get_target_initiators)
+		do
+			echo "   Initiator: $INITIATOR"
+			verbose 1 get_target_initiator_info | sed 's/^/      /'
+		done
+
+		for TPG in $(get_target_tpgs)
+		do
+			echo "   Target Portal Group: $TPG"
+			for PORTAL in $(get_tpg_portals)
+			do
+				echo "      Portal: $PORTAL"
+			done
+		done
+
+		for TG in $(get_tg_membership)
+		do
+			echo "   Target Group: $TG"
+
+			hg_list="$(echo "$views" | egrep ",$TG,|,All," | awk -F, '{print $5}' | sort -u)"
+			for HG in $hg_list
+			do
+				echo "      Host Group: $HG"
+				if [ "$HG" != 'All' ]
+				then
+					get_hg_members | sed 's/^/         Initiator: /'
+				fi
+
+				tg_views="$(echo "$views" | egrep ",$TG,|,All," | egrep ",$HG$|,All$" | sort -u)"
+				for VIEW in $tg_views
+				do
+					LU="$(echo "$VIEW" | awk -F, '{print $1}')"
+					VE="$(echo "$VIEW" | awk -F, '{print $2}')"
+					LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
+	
+					echo "         LU: $LU"
+					echo "            View Entry        : $VE"
+					echo "            LUN               : $LUN"
+					verbose 1 get_lu_info | sed 's/^/            /'
+
+					device="$(get_zfs_device)"
+					echo "            ZFS Volume: $device"
+					verbose 1 get_zfs_info | sed 's/^/               /'
+				done
+			done
+		done
+	done
+}
+
+#List the entire tree with host group as the root
+function list-hg()
+{
+	if [ -z "$objects" ]
+	then
+		hg_list="$(get_hgs)"
+	else
+		hg_list="$objects"
+	fi
+
+	views="$(get_views)"
+
+	for HG in $hg_list
+	do
+		echo "Host Group: $HG"
+		target_groups="$(echo "$views" | awk -F, '{print $4}' | sort -u)"
+		
+		get_hg_members | sed 's/^/   Initiator: /'
+
+
+		for TG in $target_groups
+		do
+			echo "   Target Group: $TG"
+			for TARGET in $(get_tg_members)
+			do
+				echo "      Target: $TARGET"
+				verbose 1 get_target_info | sed 's/^/         /'
+				for INITIATOR in $(get_target_initiators)
+				do
+					echo "         Initiator: $INITIATOR"
+					verbose 1 get_target_initiator_info | sed 's/^/            /'
+				done
+
+				for TPG in $(get_target_tpgs)
+				do
+					echo "         Target Portal Group: $TPG"
+					for PORTAL in $(get_tpg_portals)
+					do
+						echo "            Portal: $PORTAL"
+					done
+				done
+			done
+
+			for VIEW in $(echo "$views" | egrep ",$TG,|,All," | egrep ",$HG$|,All$")
+			do
+				LU="$(echo "$VIEW" | awk -F, '{print $1}')"
+				VE="$(echo "$VIEW" | awk -F, '{print $2}')"
+				LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
+
+				echo "      LU: $LU"
+				echo "         View VE           : $VE"
+				echo "         LUN               : $LUN"
+				verbose 1 get_lu_info | sed 's/^/         /'
+				device="$(get_zfs_device)"
+
+				if [ -n "$device" ]
+				then
+					echo "         ZFS Volume: $device"
+					verbose 1 get_zfs_info | sed 's/^/            /'
+				fi
+			done
+		done
+	done
+}
+
+#Return all TPGs
+function get_tpgs
+{
+	results="$(itadm list-tpg | grep -v "TARGET PORTAL GROUP" | awk '{print $1}')"
+	
+	debug "get_tpgs" 4
+	print_results
+}
+
+#Generate a graphviz dot file.  Save the output to a file and render it like this
+#./stmf_view --dot > graph.dot;dot -O -Tsvg graph.dot
+#The pdf and svg formats take up much less room, render faster, and the pdf format will easily allow you to copy/paste
+function generate_dot
+{
+	results=""
+
+	zfs_devices=""
+	targetgroups=""
+	hostgroups=""
+	portalgroups=""
+	edges=""
+	lus=""
+	
+	views="$(get_views)"
+	lun_num="$(echo "$views" | wc -l)"
+	for LU in $(get_lus)
+	do
+		if [ -z "$lus" ]
+		then
+			lus="LUs [shape=record,label=\""
+		else
+			lus="$lus|"
+		fi
+		
+		device="$(get_zfs_device)"
+		if [ -z "$device" ]
+		then
+			if [ "$debug" -ge "1" ]
+			then
+				lus="$lus{<$LU>LU: $LU|{$(get_lu_info | sed '{:q;N;s/\n/\\\\n/g;t q}')}"
+			else
+				lus="$lus{<$LU>LU: $LU"
+			fi
+		else
+			if [ "$debug" -ge "1" ]
+			then
+				lus="$lus{<$LU>Device: $device|{$(get_zfs_info | sed '{:q;N;s/\n/\\\\n/g;t q}')}|LU: $LU|{$(get_lu_info | sed '{:q;N;s/\n/\\\\n/g;t q}')}"
+			else
+				lus="$lus{<$LU>Device: $device|LU: $LU"
+			fi		
+
+		fi
+		lu_views=''
+		
+
+		for VIEW in $(echo "$views" | grep $LU)
+		do
+			VE="$(echo "$VIEW" | awk -F, '{print $2}')"
+			LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
+			TG="$(echo "$VIEW" | awk -F, '{print $4}')"
+			HG="$(echo "$VIEW" | awk -F, '{print $5}')"
+
+			if [ -z "$lu_views" ]
+			then
+				lu_views="|{"
+			else
+				lu_views="$lu_views|"
+			fi
+			
+			lu_views="$lu_views{VE: $VE|{<$LU,$VE,TG>TG: $TG|<$LU,$VE,HG>HG: $HG|LUN: $LUN}}"
+		done
+
+		if [ -n "$lu_views" ]
+		then
+			lu_views="$lu_views}"
+		fi
+
+		lus="$lus$lu_views}"
+	done
+	
+	for HG in $(get_hgs)
+	do
+		color="$(get_color)"
+
+		if [ -z "$hostgroups" ]
+		then
+			hostgroups="hostgroups [shape=record,label=\"{"
+		else
+			hostgroups="$hostgroups|{"
+		fi
+		hg_members=''
+		
+		hostgroups="$hostgroups<$HG>HG: $HG"
+		
+		for INITIATOR in $(get_hg_members)
+		do
+			if [ -z "$hg_members" ]
+			then
+				hg_members="|{"
+			else
+				hg_members="$hg_members|"
+			fi
+			hg_members="$hg_members<$INITIATOR>$INITIATOR"
+		done
+		
+		if [ -z "$hg_members" ]
+		then
+			hostgroups="$hostgroups$hg_members}"
+		else
+			hostgroups="$hostgroups$hg_members}}"
+		fi
+
+		for VIEW in $(echo "$views" | awk -v HG="$HG" -F, '{if ($5 == HG) print $0}')
+		do
+                        LU="$(echo "$VIEW" | awk -F, '{print $1}')"
+                        VE="$(echo "$VIEW" | awk -F, '{print $2}')"
+                        edges="$edges\nLUs:\"$LU,$VE,HG\" -> hostgroups:\"$HG\" [color=$color]"
+		done
+	done
+
+	for TG in $(get_tgs)
+	do
+		color="$(get_color)"
+
+		if [ -z "$targetgroups" ]
+		then
+			targetgroups="targetgroups [shape=record,label=\"{"
+		else
+			targetgroups="$targetgroups|{"
+		fi
+		tg_members=''
+		
+		targetgroups="$targetgroups<$TG>TG: $TG"
+		
+		for TARGET in $(get_tg_members)
+		do
+			if [ -z "$tg_members" ]
+			then
+				tg_members="|{"
+			else
+				tg_members="$tg_members|"
+			fi
+			
+			if [ "$debug" -ge "1" ]
+			then
+				tg_members="$tg_members{Target: $TARGET|<$(echo "$TARGET" |sed 's/:/?/g')>$(get_target_info |sed '{:q;N;s/\n/\\\\n/g;t q}')}"
+			else
+				tg_members="$tg_members<$(echo "$TARGET" |sed 's/:/?/g')>Target: $TARGET"
+			fi
+			
+			for TPG in $(get_target_tpgs)
+			do
+				edges="$edges\ntargetgroups:\"$(echo "$TARGET" | sed 's/:/?/g')\" -> tpgs:\"$TPG\""
+			done
+		done
+		
+		if [ -z "$tg_members" ]
+		then
+			targetgroups="$targetgroups$tg_members}"
+		else
+			targetgroups="$targetgroups$tg_members}}"
+		fi
+                for VIEW in $(echo "$views" | awk -v TG="$TG" -F, '{if ($4 == TG) print $0}')
+                do      
+                        LU="$(echo "$VIEW" | awk -F, '{print $1}')"
+                        VE="$(echo "$VIEW" | awk -F, '{print $2}')"
+                        edges="$edges\nLUs:\"$LU,$VE,TG\" -> targetgroups:\"$TG\" [color=$color]"
+                done
+	done
+	
+	for TPG in $(get_tpgs)
+	do
+		if [ -z "$portalgroups" ]
+		then
+			portalgroups="tpgs [shape=record,label=\""
+		else
+			portalgroups="$portalgroups|"
+		fi
+		
+		portalgroups="$portalgroups{<$TPG>TPG: $TPG"
+		
+		portals=''
+		for PORTAL in $(get_tpg_portals)
+		do
+			if [ -z "$portals" ]
+			then
+				portals="|{"
+			else
+				portals="$portals|"
+			fi
+			
+			portals="$portals<$PORTAL>Portal: $PORTAL"
+		done
+		if [ -z "$portals" ]
+		then
+			portalgroups="$portalgroups$portals}"
+		else
+			portalgroups="$portalgroups$portals}}"
+		fi
+		
+	done
+
+	if [ -n "$portalgroups" ]
+	then
+		portalgroups="$portalgroups\"]"
+	fi
+	
+	if [ -n "$targetgroups" ]
+	then
+		targetgroups="$targetgroups\"]"
+	fi
+	
+	if [ -n "$hostgroups" ]
+	then
+		hostgroups="$hostgroups\"]"
+	fi
+	
+	if [ -n "$zfs_devices" ]
+	then
+		zfs_devices="$zfs_devices\"]"
+	fi
+	
+	if [ -n "$lus" ]
+	then
+		lus="$lus\"]"
+	fi
+	results="digraph stmf {\n\trankdir=LR\nranksep=$((lun_num/15+1))\nnodesep=$((lun_num/20+1))\nsplines=ortho\n\n$results\n$zfs_devices\n\n$lus\n\n$targetgroups\n\n$hostgroups\n\n$portalgroups\n\n$edges"
+	
+	echo -e "$results\n}"
+}
+
+
+#Defaults
+unset action
+unset objects
+unset help
+debug=0
+
+color_list="antiquewhite4 aquamarine4 yellow1 azure4 bisque3 blue1 brown burlywood cadetblue chartreuse 
+chocolate coral cornflowerblue cornsilk4 cyan3 darkgoldenrod3 darkolivegreen1 darkorange1 darkorchid1 
+darkseagreen darkslateblue darkslategray4 deeppink1 deepskyblue1 dimgrey dodgerblue4 firebrick4 gold 
+goldenrod forestgreen cyan brown4 indigo red3"
+
+#Go through command line options
+unset SWITCH
+
+for i in $*
+do
+	case $i in
+		--dot)
+			check_action
+			action="dot"
+			SWITCH=''
+		;;
+		--list-view)
+			check_action
+			action="list-view"
+			SWITCH='object'
+		;;
+		--list-hg)
+			check_action
+			action="list-hg"
+			SWITCH='object'
+		;;
+		--list-target)
+			check_action
+			action="list-target"
+			SWITCH='object'
+		;;
+		--list-tg)
+			check_action
+			action="list-tg"
+			SWITCH='object'
+		;;
+		--help)  unset SWITCH;help='1' ;;
+		-v|--verbose )  SWITCH='verbose';let "debug += 1" ;;
+		*)
+			if [ "$SWITCH" == "object" ]
+			then
+				if [ -z "$objects" ]
+				then
+					objects="$i"
+				else
+					objects="$objects $i"
+				fi
+			elif [ "$SWITCH" == 'verbose' ]
+			then
+				debug="$i"
+			fi
+		;;
+	esac
+done
+
+if [ "$help" == '1' ]
+then
+	echo "Usage: stmf_view --dot|--list-view [LU LU ...]|--list-target [IQN ...|WWN ...]|--list-hg [HG ...]|--list-tg [TG ...] [-v [0-9]]"
+fi
+
+if [ "$action" == "dot" ]
+then
+	generate_dot
+elif [ "$action" == "list-view" ]
+then
+	list-view
+elif [ "$action" == "list-target" ]
+then
+	list-target
+elif [ "$action" == "list-hg" ]
+then
+	list-hg
+elif [ "$action" == "list-tg" ]
+then
+	list-tg
+fi
