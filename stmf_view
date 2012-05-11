@@ -224,11 +224,11 @@ function get_target_initiator_info()
 		if [[ "$line" =~ "$regex" ]]
 		then
 			found='1'
-		elif [ "$found" == '1' ]
+		elif [ "$found" = '1' ]
 		then
 			echo "$line" | sed 's/\ *//'
 			found='2'
-		elif [ "$found" == '2' ]
+		elif [ "$found" = '2' ]
 		then
 			echo "$line" | sed 's/\ *//'
 			unset found
@@ -336,7 +336,7 @@ function get_tg_members()
 		exit
 	fi
 
-	if [ "$TG" == 'All' ]
+	if [ "$TG" = 'All' ]
 	then
 		results="$(get_targets | awk '{print $2}')"
 	else
@@ -358,14 +358,14 @@ function get_tg_membership()
 	results='All'
 	for TG in $(get_tgs)
 	do
-		if [ "$TG" == 'All' ]
+		if [ "$TG" = 'All' ]
 		then
 			continue
 		fi
 
 		for TARGET_MEMBER in $(stmfadm list-tg -v $TG | grep 'Member:' | awk '{print $2}')
 		do
-			if [ "$TARGET_MEMBER" == "$TARGET" ]
+			if [ "$TARGET_MEMBER" = "$TARGET" ]
 			then
 				results="$results\n$TG"
 			fi
@@ -476,13 +476,13 @@ function get_color()
 	#Grab the next color in the list from the current one
 	for COLOR in $color_list
 	do
-		if [ "$found" == '1' ]
+		if [ "$found" = '1' ]
 		then
 			results="$COLOR"
 			break
 		fi
 
-		if [ "$color" == "$COLOR" ]
+		if [ "$color" = "$COLOR" ]
 		then
 			found='1'
 		fi
@@ -1021,7 +1021,7 @@ do
 		--help)  unset SWITCH;help='1' ;;
 		-v|--verbose )  SWITCH='verbose';let "debug += 1" ;;
 		*)
-			if [ "$SWITCH" == "object" ]
+			if [ "$SWITCH" = "object" ]
 			then
 				if [ -z "$objects" ]
 				then
@@ -1029,7 +1029,7 @@ do
 				else
 					objects="$objects $i"
 				fi
-			elif [ "$SWITCH" == 'verbose' ]
+			elif [ "$SWITCH" = 'verbose' ]
 			then
 				debug="$i"
 			fi
@@ -1037,24 +1037,24 @@ do
 	esac
 done
 
-if [ "$help" == '1' ]
+if [ "$help" = '1' ]
 then
 	echo "Usage: stmf_view --dot|--list-view [LU LU ...]|--list-target [IQN ...|WWN ...]|--list-hg [HG ...]|--list-tg [TG ...] [-v [0-9]]"
 fi
 
-if [ "$action" == "dot" ]
+if [ "$action" = "dot" ]
 then
 	generate_dot
-elif [ "$action" == "list-view" ]
+elif [ "$action" = "list-view" ]
 then
 	list-view
-elif [ "$action" == "list-target" ]
+elif [ "$action" = "list-target" ]
 then
 	list-target
-elif [ "$action" == "list-hg" ]
+elif [ "$action" = "list-hg" ]
 then
 	list-hg
-elif [ "$action" == "list-tg" ]
+elif [ "$action" = "list-tg" ]
 then
 	list-tg
 fi
