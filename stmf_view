@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -e
 #Copyright (c) 2012 Adam Jodock
 
 #Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation 
@@ -128,7 +128,7 @@ function get_tpg_portals()
 		exit
 	fi
 
-	results="$(itadm list-tpg -v $TPG | grep 'portals:' | awk '{print $2}' | sed 's/,/\n/')"
+	results="$(itadm list-tpg -v $TPG | awk '/portals:/ {print $2}' | sed 's/,/\n/')"
 	
 	debug "get_tpg_portals" 3
 	print_results
@@ -148,7 +148,7 @@ function get_target_tpgs()
 
 	if [[ "$TARGET" =~ $iscsi_regex ]]
 	then
-		results="$(itadm list-target -v $TARGET | grep tpg-tags | awk '{$1="";print $0}' | sed 's/^[\t ]*//' | sed 's/ = [0-9]*//g' | sed 's/,/\n/g')"
+		results="$(itadm list-target -v $TARGET | awk '/tpg-tags/ {$1="";print $0}' | sed 's/^[\t ]*//' | sed 's/ = [0-9]*//g' | sed 's/,/\n/g')"
 	fi
 	
 	debug "get_target_tpgs" 3
@@ -197,7 +197,7 @@ function get_target_initiators()
 
 	if [ "$TARGET" != "All" ]
 	then
-		results="$(stmfadm list-target -v $TARGET | grep 'Initiator' | awk '{print $2}')"
+		results="$(stmfadm list-target -v $TARGET | awk '/Initiator/ {print $2}')"
 		debug "get_target_initiators" 3
 		print_results
 	fi
@@ -224,11 +224,11 @@ function get_target_initiator_info()
 		if [[ "$line" =~ "$regex" ]]
 		then
 			found='1'
-		elif [ "$found" == '1' ]
+		elif [ "$found" = '1' ]
 		then
 			echo "$line" | sed 's/\ *//'
 			found='2'
-		elif [ "$found" == '2' ]
+		elif [ "$found" = '2' ]
 		then
 			echo "$line" | sed 's/\ *//'
 			unset found
@@ -253,7 +253,7 @@ function view_tg()
 		exit
 	fi
 
-	results="$(stmfadm list-view -l $LU $VE | grep 'Target group' | awk '{print $4}')"
+	results="$(stmfadm list-view -l $LU $VE | awk '/Target group/ {print $4}')"
 	debug "view_tg" 4
 	print_results
 }
@@ -278,7 +278,7 @@ function get_hg_members()
 #This function returns a list of all LUs
 function get_lus()
 {
-	results="$(sbdadm list-lu | egrep '[0-9abcdef]{32}' | awk '{print $1}')"
+	results="$(stmfadm list-lu | awk '{print $3}')"
 	debug "get_lus" 3
 	print_results
 }
@@ -306,7 +306,7 @@ function get_zfs_device()
 		exit
 	fi
 
-	device_path="$(stmfadm list-lu -v $LU | grep 'Data File' | awk '{$1=$2=$3="";print $0}' | sed 's/^ *//')"
+	device_path="$(stmfadm list-lu -v $LU | awk '/Data File/ {$1=$2=$3="";print $0}' | sed 's/^ *//')"
 
 	regex="^/dev/zvol/(rdsk|dsk)"
 
@@ -336,11 +336,11 @@ function get_tg_members()
 		exit
 	fi
 
-	if [ "$TG" == 'All' ]
+	if [ "$TG" = 'All' ]
 	then
 		results="$(get_targets | awk '{print $2}')"
 	else
-		results="$(stmfadm list-tg -v $TG | grep 'Member:' | awk '{print $2}')"
+		results="$(stmfadm list-tg -v $TG | awk '/Member:/ {print $2}')"
 	fi
 	debug "get_tg_members" 3
 	print_results
@@ -358,14 +358,14 @@ function get_tg_membership()
 	results='All'
 	for TG in $(get_tgs)
 	do
-		if [ "$TG" == 'All' ]
+		if [ "$TG" = 'All' ]
 		then
 			continue
 		fi
 
-		for TARGET_MEMBER in $(stmfadm list-tg -v $TG | grep 'Member:' | awk '{print $2}')
+		for TARGET_MEMBER in $(stmfadm list-tg -v $TG | awk '/Member:/ {print $2}')
 		do
-			if [ "$TARGET_MEMBER" == "$TARGET" ]
+			if [ "$TARGET_MEMBER" = "$TARGET" ]
 			then
 				results="$results\n$TG"
 			fi
@@ -385,7 +385,7 @@ function get_zfs_info()
 	fi
 
 	options="used,referenced,compressratio,compression,refreservation,logbias,volblocksize,volsize,dedup,sync"
-	origin="$(zfs get origin $device | grep -v "VALUE" | awk '{print $3}')"
+	origin="$(zfs get origin $device | awk '!/VALUE/ {print $3}')"
 	results="$(zfs get $options $device | grep "$device" | sed "s#^$device *##")"
 
 	debug "get_zfs_info" 3
@@ -418,7 +418,7 @@ function get_view_ves()
 		exit
 	fi
 
-	results="$(stmfadm list-view -l $LU 2> /dev/null | grep 'View Entry:' | awk '{print $3}')"
+	results="$(stmfadm list-view -l $LU 2> /dev/null | awk '/View Entry:/ {print $3}')"
 	debug "get_view_ves" 3
 	print_results
 }
@@ -435,9 +435,9 @@ function get_views()
 			#Which wont let me pass the variables back easily.  This may not be as efficent
 			#But I cant be bothered to look up how I got around that last time :)
 			view_entry="$(stmfadm list-view -l $LU $VE)"
-			host_group="$(echo "$view_entry" | grep 'Host group' | awk '{print $4}')"
-			target_group="$(echo "$view_entry" | grep 'Target group' | awk '{print $4}')"
-			lun="$(echo "$view_entry" | grep 'LUN' | awk '{print $3}')"
+			host_group="$(echo "$view_entry" | awk '/Host group/ {print $4}')"
+			target_group="$(echo "$view_entry" | awk '/Target group/ {print $4}')"
+			lun="$(echo "$view_entry" | awk '/LUN/ {print $3}')"
 			
 			if [ -z "$results" ]
 			then
@@ -476,13 +476,13 @@ function get_color()
 	#Grab the next color in the list from the current one
 	for COLOR in $color_list
 	do
-		if [ "$found" == '1' ]
+		if [ "$found" = '1' ]
 		then
 			results="$COLOR"
 			break
 		fi
 
-		if [ "$color" == "$COLOR" ]
+		if [ "$color" = "$COLOR" ]
 		then
 			found='1'
 		fi
@@ -747,7 +747,7 @@ function list-hg()
 #Return all TPGs
 function get_tpgs
 {
-	results="$(itadm list-tpg | grep -v "TARGET PORTAL GROUP" | awk '{print $1}')"
+	results="$(itadm list-tpg | awk '/TARGET PORTAL GROUP/ {print $1}')"
 	
 	debug "get_tpgs" 4
 	print_results
@@ -1021,7 +1021,7 @@ do
 		--help)  unset SWITCH;help='1' ;;
 		-v|--verbose )  SWITCH='verbose';let "debug += 1" ;;
 		*)
-			if [ "$SWITCH" == "object" ]
+			if [ "$SWITCH" = "object" ]
 			then
 				if [ -z "$objects" ]
 				then
@@ -1029,7 +1029,7 @@ do
 				else
 					objects="$objects $i"
 				fi
-			elif [ "$SWITCH" == 'verbose' ]
+			elif [ "$SWITCH" = 'verbose' ]
 			then
 				debug="$i"
 			fi
@@ -1037,24 +1037,24 @@ do
 	esac
 done
 
-if [ "$help" == '1' ]
+if [ "$help" = '1' ]
 then
 	echo "Usage: stmf_view --dot|--list-view [LU LU ...]|--list-target [IQN ...|WWN ...]|--list-hg [HG ...]|--list-tg [TG ...] [-v [0-9]]"
 fi
 
-if [ "$action" == "dot" ]
+if [ "$action" = "dot" ]
 then
 	generate_dot
-elif [ "$action" == "list-view" ]
+elif [ "$action" = "list-view" ]
 then
 	list-view
-elif [ "$action" == "list-target" ]
+elif [ "$action" = "list-target" ]
 then
 	list-target
-elif [ "$action" == "list-hg" ]
+elif [ "$action" = "list-hg" ]
 then
 	list-hg
-elif [ "$action" == "list-tg" ]
+elif [ "$action" = "list-tg" ]
 then
 	list-tg
 fi
