@@ -429,6 +429,7 @@ function get_views()
 	unset results
 	for LU in $(get_lus)
 	do
+		device="$(get_zfs_device)"
 		for VE in $(get_view_ves)
 		do
 			#I would really like to do a while read line here, but that requires a pipe
@@ -441,9 +442,9 @@ function get_views()
 			
 			if [ -z "$results" ]
 			then
-				results="$LU,$VE,$lun,$target_group,$host_group"
+				results="$LU,$VE,$lun,$target_group,$host_group,$device"
 			else
-				results="$results\n$LU,$VE,$lun,$target_group,$host_group"
+				results="$results\n$LU,$VE,$lun,$target_group,$host_group,$device"
 			fi
 		done
 	done
@@ -515,11 +516,11 @@ function list-view()
 		LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
 		TG="$(echo "$VIEW" | awk -F, '{print $4}')"
 		HG="$(echo "$VIEW" | awk -F, '{print $5}')"
+		device="$(echo "$VIEW" | awk -F, '{print $6}')"
 		echo "View: $LU,$VE"
 		echo "   LU: $LU"
 		echo "      View Entry: $VE"
 		verbose 1 get_lu_info | sed 's/^/   /'
-		device="$(get_zfs_device)"
 		echo "      ZFS Volume: $device"
 		verbose 1 get_zfs_info | sed 's/^/         /'
 
@@ -591,6 +592,7 @@ function list-tg()
 			VE="$(echo "$VIEW" | awk -F, '{print $2}')"
 			LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
 			HG="$(echo "$VIEW" | awk -F, '{print $5}')"
+			device="$(echo "$VIEW" | awk -F, '{print $6}')"
 
 			echo "   LU: $LU"
 			echo "      View Entry: $VE"
@@ -604,7 +606,6 @@ function list-tg()
 
 			verbose 1 get_lu_info | sed 's/^/      /'
 
-			device="$(get_zfs_device)"
 			echo "      ZFS Device: $device"
 			verbose 1 get_zfs_info | sed 's/^/         /'
 
@@ -664,13 +665,13 @@ function list-target()
 					LU="$(echo "$VIEW" | awk -F, '{print $1}')"
 					VE="$(echo "$VIEW" | awk -F, '{print $2}')"
 					LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
+					device="$(echo "$VIEW" | awk -F, '{print $6}')"
 	
 					echo "         LU: $LU"
 					echo "            View Entry        : $VE"
 					echo "            LUN               : $LUN"
 					verbose 1 get_lu_info | sed 's/^/            /'
 
-					device="$(get_zfs_device)"
 					echo "            ZFS Volume: $device"
 					verbose 1 get_zfs_info | sed 's/^/               /'
 				done
@@ -727,12 +728,12 @@ function list-hg()
 				LU="$(echo "$VIEW" | awk -F, '{print $1}')"
 				VE="$(echo "$VIEW" | awk -F, '{print $2}')"
 				LUN="$(echo "$VIEW" | awk -F, '{print $3}')"
+				device="$(echo "$VIEW" | awk -F, '{print $6}')"
 
 				echo "      LU: $LU"
 				echo "         View VE           : $VE"
 				echo "         LUN               : $LUN"
 				verbose 1 get_lu_info | sed 's/^/         /'
-				device="$(get_zfs_device)"
 
 				if [ -n "$device" ]
 				then
@@ -778,7 +779,7 @@ function generate_dot
 			lus="$lus|"
 		fi
 		
-		device="$(get_zfs_device)"
+		device="$(echo "$VIEW" | awk -F, '{print $6}')"
 		if [ -z "$device" ]
 		then
 			if [ "$debug" -ge "1" ]
