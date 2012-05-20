@@ -148,7 +148,7 @@ function get_target_tpgs()
 
 	if [[ "$TARGET" =~ $iscsi_regex ]]
 	then
-		results="$(itadm list-target -v $TARGET | awk '/tpg-tags/ {$1="";print $0}' | sed 's/^[\t ]*//' | sed 's/ = [0-9]*//g' | sed 's/,/\n/g')"
+		results="$(itadm list-target -v $TARGET | awk '/tpg-tags/ {$1="";print $0}' | sed -e 's/^[\t ]*//' -e 's/ = [0-9]*//g' -e 's/,/\n/g')"
 	fi
 	
 	debug "get_target_tpgs" 3
