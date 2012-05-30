@@ -75,7 +75,7 @@ function print_results()
 {
 	if [ -n "$results" ]
 	then
-		echo -e -n  "$results" | sort -u
+		echo -e -n  "$results" | grep -v "^$" | sort -u
 	fi
 
 	debug "print_results" 9
@@ -239,7 +239,8 @@ function get_target_initiator_info()
 #This function returns a list of all of the host groups
 function get_hgs()
 {
-	results="All\n$(stmfadm list-hg | awk '{print $3}')"
+	XPATH="/service_bundle/service/property_group[@name='host_groups']/propval[not (contains(@name, 'member_list'))]/@value"
+	results="All\n$(xpath)"
 	debug "get_hgs" 4
 	print_results
 }
@@ -253,7 +254,14 @@ function view_tg()
 		exit
 	fi
 
-	results="$(stmfadm list-view -l $LU $VE | awk '/Target group/ {print $4}')"
+	XPATH="/service_bundle/service/property_group[@name='view_entry-$VE-$LU']/propval[@name='target_group']/@value"
+	results="$(xpath)"
+	
+	if [ -z "$results" ]
+	then
+		results="All"
+	fi
+	
 	debug "view_tg" 4
 	print_results
 }
@@ -267,18 +275,42 @@ function get_hg_members()
 		exit
 	fi
 
+	
 	if [ "$HG" != 'All' ]
 	then
-		results="$(stmfadm list-hg -v $HG | grep -v 'Host Group:' | sed 's/^\tMember: //')"
-		debug "get_hg_members" 3
-		print_results
+		XPATH="/service_bundle/service/property_group[@name='host_groups']/propval[not (contains(@name, 'member_list')) and @value='$HG']/@name"
+		xml_group="$(xpath)"
+		
+		#I don't know who created the XML spec for stmf but they really didn't structure the groups logically...
+		#A normal person would make the members a sub node instead of the group, but instead they are their own node
+		#and the path is different for a single entry versus multiple.
+		#Because of this we need two queries and a separate case for a single host vs multiple wwns/IQNs.
+
+		XPATH="/service_bundle/service/property_group[@name='host_groups']/propval[@name='$xml_group-member_list']/@value"
+		results="$(xpath)"
+		
+		if [ -z "$results" ]
+		then
+			XPATH="/service_bundle/service/property_group[@name='host_groups']/property[@name='$xml_group-member_list']/ustring_list/value_node/@value"
+			results="$(xpath)"
+		fi
+	else
+		XPATH="/service_bundle/service/property_group[@name='host_groups']/property[contains(@name,'member_list')]/ustring_list/value_node/@value"
+		results="$(xpath)"
+		XPATH="/service_bundle/service/property_group[@name='host_groups']/propval[contains(@name,'member_list')]/@value"
+		results="$results\n$(xpath)"
 	fi
+
+	debug "get_hg_members" 3
+	print_results
 }
 
 #This function returns a list of all LUs
 function get_lus()
 {
-	results="$(stmfadm list-lu | awk '{print $3}')"
+	XPATH="/service_bundle/service/property_group[starts-with(@name,'lu-')]/@name"
+	results="$(xpath | sed 's/^lu-//')"
+
 	debug "get_lus" 3
 	print_results
 }
@@ -322,7 +354,9 @@ function get_zfs_device()
 #This function returns a list of all target groups
 function get_tgs()
 {
-	results="All\n$(stmfadm list-tg | awk '{print $3}')"
+	XPATH="/service_bundle/service/property_group[@name='target_groups']/propval[not (contains(@name, 'member_list'))]/@value"
+	results="All\n$(xpath)"
+	
 	debug "get_tgs" 4
 	print_results
 }
@@ -338,10 +372,29 @@ function get_tg_members()
 
 	if [ "$TG" = 'All' ]
 	then
-		results="$(get_targets | awk '{print $2}')"
+		XPATH="/service_bundle/service/property_group[@name='target_groups']/propval[not (contains(@name, 'member_list')) and @value='$TG']/@name"
+		xml_group="$(xpath)"
+		
+		#I don't know who created the XML spec for stmf but they really didn't structure the groups logically...
+		#A normal person would make the members a sub node instead of the group, but instead they are their own node
+		#and the path is different for a single entry versus multiple.
+		#Because of this we need two queries and a separate case for a single host vs multiple wwns/IQNs.
+
+		XPATH="/service_bundle/service/property_group[@name='target_groups']/propval[@name='$xml_group-member_list']/@value"
+		results="$(xpath)"
+		
+		if [ -z "$results" ]
+		then
+			XPATH="/service_bundle/service/property_group[@name='target_groups']/property[@name='$xml_group-member_list']/ustring_list/value_node/@value"
+			results="$(xpath)"
+		fi
 	else
-		results="$(stmfadm list-tg -v $TG | awk '/Member:/ {print $2}')"
-	fi
+		XPATH="/service_bundle/service/property_group[@name='target_groups']/property[contains(@name,'member_list')]/ustring_list/value_node/@value"
+		results="$(xpath)"
+		XPATH="/service_bundle/service/property_group[@name='target_groups']/propval[contains(@name,'member_list')]/@value"
+		results="$results\n$(xpath)"
+	fi	
+	
 	debug "get_tg_members" 3
 	print_results
 }
@@ -355,22 +408,30 @@ function get_tg_membership()
 		exit
 	fi
 
-	results='All'
-	for TG in $(get_tgs)
-	do
-		if [ "$TG" = 'All' ]
-		then
-			continue
-		fi
 
-		for TARGET_MEMBER in $(stmfadm list-tg -v $TG | awk '/Member:/ {print $2}')
-		do
-			if [ "$TARGET_MEMBER" = "$TARGET" ]
-			then
-				results="$results\n$TG"
-			fi
-		done
-	done
+	XPATH="/service_bundle/service/property_group[@name='target_groups']/propval[@value='$TARGET']/@name"
+	target_group="$(xpath)"
+
+	#stmf only allows a target to be a part of one group, so this will be only one or the other type of group.
+	#It really seems like stmf should be capable of having a target in more than one group and a host in more than
+	#one host group, but for some reason it cant.  It already does this with the "All" groups, and you can logically
+	#do this yourself by creating one hg per host and one tg per group and then creating multiple views.
+	#This of course adds to the management of the system, so it would be much better if stmf was just fixed to do what it
+	#is apparently already capable of.
+	if [ -z "$target_group" ]
+	then
+		XPATH="/service_bundle/service/property_group[@name='target_groups']/*[./ustring_list/value_node/@value='$TARGET']/@name"
+		target_group="$(xpath | sed 's/-member_list$//')"
+	fi
+	
+	if [ -n "$target_group" ]
+	then
+		XPATH="/service_bundle/service/property_group[@name='target_groups']/propval[@name='$target_group']/@value"
+		results="All\n$(xpath)"
+	else
+		results="All"
+	fi
+
 	debug "get_tg_membersip" 3
 	print_results
 }
@@ -417,8 +478,10 @@ function get_view_ves()
 		echo "Error in get_view_ves: LU=$LU"
 		exit
 	fi
+	
+	XPATH="/service_bundle/service/property_group[starts-with(@name,'view_entry') and contains(@name,'$LU')]/@name"
+	results="$(xpath | awk -F- '{print $2}')"
 
-	results="$(stmfadm list-view -l $LU 2> /dev/null | awk '/View Entry:/ {print $3}')"
 	debug "get_view_ves" 3
 	print_results
 }
@@ -431,15 +494,26 @@ function get_views()
 	do
 		device="$(get_zfs_device)"
 		for VE in $(get_view_ves)
-		do
-			#I would really like to do a while read line here, but that requires a pipe
-			#Which wont let me pass the variables back easily.  This may not be as efficent
-			#But I cant be bothered to look up how I got around that last time :)
-			view_entry="$(stmfadm list-view -l $LU $VE)"
-			host_group="$(echo "$view_entry" | awk '/Host group/ {print $4}')"
-			target_group="$(echo "$view_entry" | awk '/Target group/ {print $4}')"
-			lun="$(echo "$view_entry" | awk '/LUN/ {print $3}')"
+		do			
+			XPATH="/service_bundle/service/property_group[@name='view_entry-$VE-$LU']/propval[@name='target_group']/@value"
+			target_group="$(xpath)"
 			
+			if [ -z "$target_group" ]
+			then
+				target_group="All"
+			fi
+			
+			XPATH="/service_bundle/service/property_group[@name='view_entry-$VE-$LU']/propval[@name='target_group']/@value"
+			host_group="$(xpath)"
+			
+			if [ -z "$host_group" ]
+			then
+				host_group="All"
+			fi
+			
+			XPATH="/service_bundle/service/property_group[@name='view_entry-$VE-$LU']/propval[@name='lu_nbr']/@value"
+			lun="$(printf '%d' 0x$(xpath | sed 's/000000000000$//'))"
+
 			if [ -z "$results" ]
 			then
 				results="$LU,$VE,$lun,$target_group,$host_group,$device"
@@ -450,6 +524,40 @@ function get_views()
 	done
 
 	debug "get_views" 3
+	print_results
+}
+
+function load_xml()
+{
+	svccfg export system/stmf > /tmp/stmf_view.xml
+	if [ "$?" != '0' ]
+	then
+		echo "Error reading XML from svccfg.  Are you sure stmf is installed?  Exiting."
+		exit
+	fi
+}
+
+function xpath()
+{
+	if [ -z "$xml_temp" ]
+	then
+		xml_temp='/tmp/stmf_view.xml'
+	fi
+	
+	if [ -z "$XPATH" ]
+	then
+		echo "Error in xpath: XPATH=$XPATH"
+		exit
+	fi
+	
+	if [ ! -r $xml_temp ]
+	then
+		echo "Error in xpath: Unable to read $xml_temp  Exiting"
+		exit
+	fi
+	
+	results="$(echo "cat $XPATH" | xmllint --shell $xml_temp | grep -v '\-------' | grep -v "^/" | awk -F= '{print $2}' | sed 's/"//g')"
+	debug "xmllint" 6
 	print_results
 }
 
@@ -586,7 +694,7 @@ function list-tg()
 			verbose 1 get_target_info | sed 's/^/      /'
 		done
 
-		for VIEW in $(echo "$views" | egrep ",$TG,|,All,")
+		for VIEW in $(echo "$views" | awk -v TG="$TG" -F, '{if ($4 == TG || $4 == "All") print $0}')
 		do
 			LU="$(echo "$VIEW" | awk -F, '{print $1}')"
 			VE="$(echo "$VIEW" | awk -F, '{print $2}')"
@@ -650,7 +758,7 @@ function list-target()
 		do
 			echo "   Target Group: $TG"
 
-			hg_list="$(echo "$views" | egrep ",$TG,|,All," | awk -F, '{print $5}' | sort -u)"
+			hg_list="$(echo "$views" | awk -v TG="$TG" -F, '{if ($4 == TG || $4 == "All") print $5}' | sort -u)"
 			for HG in $hg_list
 			do
 				echo "      Host Group: $HG"
@@ -659,7 +767,7 @@ function list-target()
 					get_hg_members | sed 's/^/         Initiator: /'
 				fi
 
-				tg_views="$(echo "$views" | egrep ",$TG,|,All," | egrep ",$HG$|,All$" | sort -u)"
+				tg_views="$(echo "$views" | awk -v TG="$TG" -F, '{if ($4 == TG || $4 == "All") print $0}' | awk -v HG="$HG" -F, '{if ($5 == HG || $5 == "All") print $0}' | sort -u)"
 				for VIEW in $tg_views
 				do
 					LU="$(echo "$VIEW" | awk -F, '{print $1}')"
@@ -723,7 +831,7 @@ function list-hg()
 				done
 			done
 
-			for VIEW in $(echo "$views" | egrep ",$TG,|,All," | egrep ",$HG$|,All$")
+			for VIEW in $(echo "$views" | awk -v TG="$TG" -F, '{if ($4 == TG || $4 == "All") print $0}' | awk -v HG="$HG" -F, '{if ($5 == HG || $5 == "All") print $0}')
 			do
 				LU="$(echo "$VIEW" | awk -F, '{print $1}')"
 				VE="$(echo "$VIEW" | awk -F, '{print $2}')"
@@ -982,11 +1090,16 @@ unset action
 unset objects
 unset help
 debug=0
+xml_temp='/tmp/stmf_view.xml'
+
 
 color_list="antiquewhite4 aquamarine4 yellow1 azure4 bisque3 blue1 brown burlywood cadetblue chartreuse 
 chocolate coral cornflowerblue cornsilk4 cyan3 darkgoldenrod3 darkolivegreen1 darkorange1 darkorchid1 
 darkseagreen darkslateblue darkslategray4 deeppink1 deepskyblue1 dimgrey dodgerblue4 firebrick4 gold 
 goldenrod forestgreen cyan brown4 indigo red3"
+
+
+
 
 #Go through command line options
 unset SWITCH
@@ -1041,6 +1154,12 @@ done
 if [ "$help" = '1' ]
 then
 	echo "Usage: stmf_view --dot|--list-view [LU LU ...]|--list-target [IQN ...|WWN ...]|--list-hg [HG ...]|--list-tg [TG ...] [-v [0-9]]"
+	exit
+fi
+
+if [ -n "$action" ]
+then
+	load_xml
 fi
 
 if [ "$action" = "dot" ]
