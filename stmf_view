@@ -1120,22 +1120,22 @@ do
 			action="dot"
 			SWITCH=''
 		;;
-		--list-view)
+		--list-view|--list-views)
 			check_action
 			action="list-view"
 			SWITCH='object'
 		;;
-		--list-hg)
+		--list-hg|--list-hgs)
 			check_action
 			action="list-hg"
 			SWITCH='object'
 		;;
-		--list-target)
+		--list-target|--list-targets)
 			check_action
 			action="list-target"
 			SWITCH='object'
 		;;
-		--list-tg)
+		--list-tg|--list-tgs)
 			check_action
 			action="list-tg"
 			SWITCH='object'
