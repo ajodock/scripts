@@ -622,9 +622,9 @@ function get_tg_views()
 }
 
 #Return all TPGs
-function get_tpgs
+function get_tpgs()
 {
-	results="$(itadm list-tpg | awk '/TARGET PORTAL GROUP/ {print $1}')"
+	results="$(itadm list-tpg | grep -v "TARGET PORTAL GROUP" | awk '{print $1}')"
 	
 	debug "get_tpgs" 4
 	print_results
@@ -1098,7 +1098,12 @@ chocolate coral cornflowerblue cornsilk4 cyan3 darkgoldenrod3 darkolivegreen1 da
 darkseagreen darkslateblue darkslategray4 deeppink1 deepskyblue1 dimgrey dodgerblue4 firebrick4 gold 
 goldenrod forestgreen cyan brown4 indigo red3"
 
-
+#Check for xmllint
+if ! command -v xmllint &> /dev/null
+then
+	echo "Error: xmllint is not installed.  Exiting."
+	exit
+fi
 
 
 #Go through command line options
