@@ -639,10 +639,13 @@ function get_tpg_portals()
 		exit
 	fi
 
-	results="$(itadm list-tpg -v $TPG | awk '/portals:/ {print $2}' | sed 's/,/\n/')"
+	if [ "$TPG" != 'default' ]
+	then
+		results="$(itadm list-tpg -v $TPG | awk '/portals:/ {print $2}' | sed 's/,/\n/')"
 	
-	debug "get_tpg_portals" 3
-	print_results
+		debug "get_tpg_portals" 3
+		print_results
+	fi
 
 }
 
