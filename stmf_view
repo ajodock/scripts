@@ -717,11 +717,16 @@ function get_zfs_device()
 
 	device_path="$(stmfadm list-lu -v $LU | awk '/Data File/ {$1=$2=$3="";print $0}' | sed 's/^ *//')"
 
-	regex="^/dev/zvol/(rdsk|dsk)"
-
-	if [[ "$device_path" =~ $regex ]]
+	if [ -z "$device_path" ]
 	then
-		results="$(echo "$device_path" | sed 's#^/dev/zvol/.dsk/##')"
+		results=''
+	else
+		regex="^/dev/zvol/(rdsk|dsk)"
+
+		if [[ "$device_path" =~ $regex ]]
+		then
+			results="$(echo "$device_path" | sed 's#^/dev/zvol/.dsk/##')"
+		fi
 	fi
 
 	debug "get_zfs_device" 3
