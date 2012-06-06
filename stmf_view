@@ -1154,6 +1154,9 @@ do
 			elif [ "$SWITCH" = 'verbose' ]
 			then
 				debug="$i"
+			else
+				echo "Unknown option: $i"
+				exit
 			fi
 		;;
 	esac
