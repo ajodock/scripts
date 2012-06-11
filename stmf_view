@@ -210,17 +210,34 @@ function generate_dot()
 				tg_members="$tg_members|"
 			fi
 			
-			if [ "$debug" -ge "1" ]
+			if [ "$TG" = 'All' ]
 			then
-				tg_members="$tg_members{Target: $TARGET|<$(echo "$TARGET" |sed 's/:/?/g')>$(get_target_info |sed '{:q;N;s/\n/\\\\n/g;t q}')}"
+				if [ "$debug" -ge "1" ]
+				then
+					tg_members="$tg_members{Target: $TARGET|<$(echo "$TARGET-all" |sed 's/:/?/g')>$(get_target_info |sed '{:q;N;s/\n/\\\\n/g;t q}')}"
+				else
+					tg_members="$tg_members<$(echo "$TARGET-all" |sed 's/:/?/g')>Target: $TARGET"
+				fi
+
+				for TPG in $(get_target_tpgs)
+				do
+					edges="$edges\ntargetgroups:\"$(echo "$TARGET-all" | sed 's/:/?/g')\" -> tpgs:\"$TPG\""
+				done
 			else
-				tg_members="$tg_members<$(echo "$TARGET" |sed 's/:/?/g')>Target: $TARGET"
+				if [ "$debug" -ge "1" ]
+				then
+					tg_members="$tg_members{Target: $TARGET|<$(echo "$TARGET" |sed 's/:/?/g')>$(get_target_info |sed '{:q;N;s/\n/\\\\n/g;t q}')}"
+				else
+					tg_members="$tg_members<$(echo "$TARGET" |sed 's/:/?/g')>Target: $TARGET"
+				fi
+
+				for TPG in $(get_target_tpgs)
+				do
+					edges="$edges\ntargetgroups:\"$(echo "$TARGET" | sed 's/:/?/g')\" -> tpgs:\"$TPG\""
+				done
 			fi
 			
-			for TPG in $(get_target_tpgs)
-			do
-				edges="$edges\ntargetgroups:\"$(echo "$TARGET" | sed 's/:/?/g')\" -> tpgs:\"$TPG\""
-			done
+
 		done
 		
 		if [ -z "$tg_members" ]
@@ -253,7 +270,6 @@ function generate_dot()
 		
 		portals=''
 		
-		#Associate targets with TPGs
 		for PORTAL in $(get_tpg_portals)
 		do
 			if [ -z "$portals" ]
@@ -552,7 +568,7 @@ function get_tg_members()
 		exit
 	fi
 
-	if [ "$TG" = 'All' ]
+	if [ "$TG" != 'All' ]
 	then
 		XPATH="/service_bundle/service/property_group[@name='target_groups']/propval[not (contains(@name, 'member_list')) and @value='$TG']/@name"
 		xml_group="$(xpath)"
