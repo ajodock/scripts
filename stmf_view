@@ -85,6 +85,8 @@ function generate_dot()
 	
 	views="$(get_views)"
 	lun_num="$(echo "$views" | wc -l)"
+	
+	#Generate LU Nodes
 	for LU in $(get_lus)
 	do
 		if [ -z "$lus" ]
@@ -114,7 +116,7 @@ function generate_dot()
 		fi
 		lu_views=''
 		
-
+		#For each LU node create view subnodes
 		for VIEW in $(echo "$views" | grep $LU)
 		do
 			VE="$(echo "$VIEW" | awk -F, '{print $2}')"
@@ -140,6 +142,7 @@ function generate_dot()
 		lus="$lus$lu_views}"
 	done
 	
+	#Generate host group nodes
 	for HG in $(get_hgs)
 	do
 		color="$(get_color)"
@@ -154,6 +157,7 @@ function generate_dot()
 		
 		hostgroups="$hostgroups<$HG>HG: $HG"
 		
+		#Generate initiator sub nodes
 		for INITIATOR in $(get_hg_members)
 		do
 			if [ -z "$hg_members" ]
@@ -172,6 +176,7 @@ function generate_dot()
 			hostgroups="$hostgroups$hg_members}}"
 		fi
 
+		#Generate connections between each view and the host group
 		for VIEW in $(echo "$views" | awk -v HG="$HG" -F, '{if ($5 == HG) print $0}')
 		do
                         LU="$(echo "$VIEW" | awk -F, '{print $1}')"
@@ -180,6 +185,7 @@ function generate_dot()
 		done
 	done
 
+	#Generate target groups
 	for TG in $(get_tgs)
 	do
 		color="$(get_color)"
@@ -194,6 +200,7 @@ function generate_dot()
 		
 		targetgroups="$targetgroups<$TG>TG: $TG"
 		
+		#Generate target sub nodes
 		for TARGET in $(get_tg_members)
 		do
 			if [ -z "$tg_members" ]
@@ -222,6 +229,8 @@ function generate_dot()
 		else
 			targetgroups="$targetgroups$tg_members}}"
 		fi
+		
+		#Connect views to target groups
                 for VIEW in $(echo "$views" | awk -v TG="$TG" -F, '{if ($4 == TG) print $0}')
                 do      
                         LU="$(echo "$VIEW" | awk -F, '{print $1}')"
@@ -230,6 +239,7 @@ function generate_dot()
                 done
 	done
 	
+	#Generate target poral group nodes
 	for TPG in $(get_tpgs)
 	do
 		if [ -z "$portalgroups" ]
@@ -242,6 +252,8 @@ function generate_dot()
 		portalgroups="$portalgroups{<$TPG>TPG: $TPG"
 		
 		portals=''
+		
+		#Associate targets with TPGs
 		for PORTAL in $(get_tpg_portals)
 		do
 			if [ -z "$portals" ]
@@ -666,7 +678,7 @@ function get_views()
 				target_group="All"
 			fi
 			
-			XPATH="/service_bundle/service/property_group[@name='view_entry-$VE-$LU']/propval[@name='target_group']/@value"
+			XPATH="/service_bundle/service/property_group[@name='view_entry-$VE-$LU']/propval[@name='host_group']/@value"
 			host_group="$(xpath)"
 			
 			if [ -z "$host_group" ]
